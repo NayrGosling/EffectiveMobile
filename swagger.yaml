@@ -1,0 +1,155 @@
+openapi: 3.0.0
+info:
+  title: Person Service API
+  version: "1.0.0"
+  description: API для управления сущностями Person с обогащением данных
+servers:
+  - url: http://localhost:8080
+paths:
+  /persons:
+    post:
+      summary: Создать нового Person
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonCreate'
+      responses:
+        '201':
+          description: Person создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Person'
+        '400':
+          description: Неверный запрос
+        '500':
+          description: Ошибка сервера
+    get:
+      summary: Получить список Person
+      parameters:
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: Фильтр по имени (ILIKE)
+        - in: query
+          name: surname
+          schema:
+            type: string
+          description: Фильтр по фамилии (ILIKE)
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+          description: Количество записей
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+          description: Смещение
+      responses:
+        '200':
+          description: Список Person
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Person'
+        '500':
+          description: Ошибка сервера
+
+  /persons/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+        description: Идентификатор Person
+    put:
+      summary: Обновить Person по ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonUpdate'
+      responses:
+        '204':
+          description: Успешное обновление, без содержимого
+        '400':
+          description: Неверный запрос
+        '404':
+          description: Person не найден
+        '500':
+          description: Ошибка сервера
+    delete:
+      summary: Удалить Person по ID
+      responses:
+        '204':
+          description: Успешное удаление, без содержимого
+        '400':
+          description: Неверный ID
+        '404':
+          description: Person не найден
+        '500':
+          description: Ошибка сервера
+
+components:
+  schemas:
+    PersonCreate:
+      type: object
+      required:
+        - name
+        - surname
+      properties:
+        name:
+          type: string
+        surname:
+          type: string
+        patronymic:
+          type: string
+          nullable: true
+    PersonUpdate:
+      type: object
+      required:
+        - name
+        - surname
+      properties:
+        name:
+          type: string
+        surname:
+          type: string
+        patronymic:
+          type: string
+          nullable: true
+    Person:
+      allOf:
+        - $ref: '#/components/schemas/PersonCreate'
+        - type: object
+          required:
+            - id
+            - created_at
+            - message
+          properties:
+            id:
+              type: integer
+            age:
+              type: integer
+              nullable: true
+            gender:
+              type: string
+              nullable: true
+            nationality:
+              type: string
+              nullable: true
+            created_at:
+              type: string
+              format: date-time
+            message:
+              type: string

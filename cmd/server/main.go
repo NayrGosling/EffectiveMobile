@@ -11,6 +11,7 @@ import (
 	"effect/internal/config"
 	"effect/internal/db"
 	"effect/internal/handler"
+	"effect/internal/middleware"
 )
 
 func main() {
@@ -52,6 +53,7 @@ func main() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	}))
+
 	mux.HandleFunc("/persons/", logged(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPut:
@@ -63,9 +65,11 @@ func main() {
 		}
 	}))
 
+	handlerWithCORS := middleware.CORS(mux)
+
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	log.Infof("listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, handlerWithCORS); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
