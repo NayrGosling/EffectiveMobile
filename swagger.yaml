@@ -27,6 +27,10 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PersonCreate'
+            example:
+              name: "Dmitriy"
+              surname: "Ushakov"
+              patronymic: "Vasilevich"
       responses:
         '201':
           description: Person создан
@@ -91,6 +95,10 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PersonUpdate'
+            example:
+              name: "Dmitriy"
+              surname: "Ushakov"
+              patronymic: "Vasilevich"
       responses:
         '204':
           description: Успешное обновление
@@ -186,6 +194,10 @@ components:
         patronymic:
           type: string
           nullable: true
+      example:
+        name: "Dmitriy"
+        surname: "Ushakov"
+        patronymic: "Vasilevich"
     PersonUpdate:
       type: object
       required:
@@ -199,6 +211,10 @@ components:
         patronymic:
           type: string
           nullable: true
+      example:
+        name: "Dmitriy"
+        surname: "Ushakov"
+        patronymic: "Vasilevich"
     Person:
       allOf:
         - $ref: '#/components/schemas/PersonCreate'

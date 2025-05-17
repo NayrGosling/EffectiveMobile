@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 
@@ -20,6 +21,7 @@ type EnrichResult struct {
 // Возвращает результат обогащения и ошибку, если таковая возникла.
 func Enrich(name string) (*EnrichResult, error) {
 	log.Debugf("service.Enrich: starting enrichment for name=%s", name)
+
 	var (
 		wg  sync.WaitGroup
 		res EnrichResult
@@ -29,10 +31,12 @@ func Enrich(name string) (*EnrichResult, error) {
 
 	wg.Add(3)
 
+	// Agify
 	go func() {
 		defer wg.Done()
 		url := fmt.Sprintf("https://api.agify.io/?name=%s", name)
 		log.Debugf("service.Enrich: calling Agify API: %s", url)
+
 		var a struct {
 			Age *int `json:"age"`
 		}
@@ -43,16 +47,19 @@ func Enrich(name string) (*EnrichResult, error) {
 			log.WithError(e).Error("service.Enrich: Agify call failed")
 			return
 		}
+
 		mu.Lock()
 		res.Age = a.Age
 		mu.Unlock()
 		log.Debugf("service.Enrich: Agify result: %v", a.Age)
 	}()
 
+	// Genderize
 	go func() {
 		defer wg.Done()
 		url := fmt.Sprintf("https://api.genderize.io/?name=%s", name)
 		log.Debugf("service.Enrich: calling Genderize API: %s", url)
+
 		var g struct {
 			Gender *string `json:"gender"`
 		}
@@ -63,16 +70,19 @@ func Enrich(name string) (*EnrichResult, error) {
 			log.WithError(e).Error("service.Enrich: Genderize call failed")
 			return
 		}
+
 		mu.Lock()
 		res.Gender = g.Gender
 		mu.Unlock()
 		log.Debugf("service.Enrich: Genderize result: %v", g.Gender)
 	}()
 
+	// Nationalize
 	go func() {
 		defer wg.Done()
 		url := fmt.Sprintf("https://api.nationalize.io/?name=%s", name)
 		log.Debugf("service.Enrich: calling Nationalize API: %s", url)
+
 		var n struct {
 			Country []struct {
 				CountryID   string  `json:"country_id"`
@@ -86,6 +96,7 @@ func Enrich(name string) (*EnrichResult, error) {
 			log.WithError(e).Error("service.Enrich: Nationalize call failed")
 			return
 		}
+
 		if len(n.Country) > 0 {
 			mu.Lock()
 			res.Nationality = &n.Country[0].CountryID
@@ -95,16 +106,18 @@ func Enrich(name string) (*EnrichResult, error) {
 	}()
 
 	wg.Wait()
+
 	if err != nil {
 		log.WithError(err).Error("service.Enrich: enrichment failed")
 		return nil, err
 	}
+
 	log.Debugf("service.Enrich: completed enrichment for name=%s: %+v", name, res)
 	return &res, nil
 }
 
 // callAPI отправляет GET запрос на указанный URL и декодирует ответ в указанный интерфейс.
-// Если возникает ошибка при отправке запроса или декодировании ответа, возвращает ошибку.
+// Если тело ответа пустое (EOF), ошибка игнорируется.
 func callAPI(url string, out interface{}) error {
 	log.Debugf("service.callAPI: GET %s", url)
 
@@ -114,5 +127,13 @@ func callAPI(url string, out interface{}) error {
 	}
 	defer resp.Body.Close()
 
-	return json.NewDecoder(resp.Body).Decode(out)
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(out); err != nil {
+		// если тело было пустое — игнорируем
+		if err == io.EOF {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
