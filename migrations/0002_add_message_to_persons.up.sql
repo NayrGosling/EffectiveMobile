@@ -1,0 +1,2 @@
+ALTER TABLE persons
+  ADD COLUMN message TEXT NOT NULL DEFAULT '';
