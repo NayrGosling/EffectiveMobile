@@ -1,8 +1,10 @@
 package main
 
 import (
-	"log"
 	"os"
+
+	"github.com/joho/godotenv"
+	log "github.com/sirupsen/logrus"
 
 	"effect/internal/config"
 	"effect/internal/db"
@@ -10,18 +12,21 @@ import (
 )
 
 func main() {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = config.GetDBConnString()
-	}
+	_ = godotenv.Load()
+	cfg := config.Load()
 
-	dbConn, err := db.NewDB(dsn)
+	log.SetLevel(cfg.LogLevel)
+	log.Info("running migrations")
+
+	dbConn, err := db.NewDB(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("connect to DB: %v", err)
 	}
+	log.Debug("connected to database for migrations")
 
+	os.Setenv("MIGRATIONS_DIR", cfg.MigrationsDir)
 	if err := migrations.Run(dbConn); err != nil {
 		log.Fatalf("apply migrations: %v", err)
 	}
-	log.Println("migrations applied")
+	log.Info("migrations applied successfully")
 }

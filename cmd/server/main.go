@@ -1,8 +1,12 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"net/http"
+	"os"
+
+	"github.com/joho/godotenv"
+	log "github.com/sirupsen/logrus"
 
 	"effect/internal/config"
 	"effect/internal/db"
@@ -10,15 +14,35 @@ import (
 )
 
 func main() {
-	connStr := config.GetDBConnString()
-	database, err := db.NewDB(connStr)
+	_ = godotenv.Load()
+
+	cfg := config.Load()
+
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
+	log.SetOutput(os.Stdout)
+	log.SetLevel(cfg.LogLevel)
+	log.Infof("starting service on port %d, log level=%s", cfg.Port, cfg.LogLevel)
+
+	dbConn, err := db.NewDB(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("db connect: %v", err)
 	}
-	h := &handler.PersonHandler{DB: database}
+	log.Debug("database connection established")
+
+	h := &handler.PersonHandler{DB: dbConn}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/persons", func(w http.ResponseWriter, r *http.Request) {
+
+	logged := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			log.Infof("%s %s", r.Method, r.URL.Path)
+			next(w, r)
+		}
+	}
+
+	mux.HandleFunc("/persons", logged(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
 			h.Create(w, r)
@@ -27,9 +51,8 @@ func main() {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
-	mux.HandleFunc("/persons/", func(w http.ResponseWriter, r *http.Request) {
-		// пути вида /persons/{id}
+	}))
+	mux.HandleFunc("/persons/", logged(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPut:
 			h.Update(w, r)
@@ -38,10 +61,11 @@ func main() {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
+	}))
 
-	log.Println("listening on :8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	addr := fmt.Sprintf(":%d", cfg.Port)
+	log.Infof("listening on %s", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }

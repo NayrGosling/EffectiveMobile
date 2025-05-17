@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
+
 	"effect/internal/model"
 	"effect/internal/service"
 )
@@ -17,21 +19,23 @@ type PersonHandler struct {
 }
 
 func (h *PersonHandler) Create(w http.ResponseWriter, r *http.Request) {
+	log.Debug("PersonHandler.Create: decoding request body")
 	var p model.Person
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		log.WithError(err).Warn("PersonHandler.Create: invalid request payload")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// обогащаем
+	log.Infof("PersonHandler.Create: enriching data for name=%s", p.Name)
 	info, err := service.Enrich(p.Name)
 	if err != nil {
+		log.WithError(err).Error("PersonHandler.Create: enrich error")
 		http.Error(w, "enrich error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	p.Age, p.Gender, p.Nationality = info.Age, info.Gender, info.Nationality
 
-	// формируем сообщение
 	p.Message = fmt.Sprintf(
 		"%s %s%s: age %v, gender %v, nationality %v",
 		p.Name, p.Surname,
@@ -46,22 +50,25 @@ func (h *PersonHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ptrToString(p.Nationality, "unknown"),
 	)
 
-	// сохраняем в БД
 	query := `
-      INSERT INTO persons (name, surname, patronymic, age, gender, nationality)
-      VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at`
+        INSERT INTO persons (name, surname, patronymic, age, gender, nationality)
+        VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at`
+	log.Debug("PersonHandler.Create: executing DB insert")
 	if err := h.DB.QueryRow(query,
 		p.Name, p.Surname, p.Patronymic, p.Age, p.Gender, p.Nationality,
 	).Scan(&p.ID, &p.CreatedAt); err != nil {
+		log.WithError(err).Error("PersonHandler.Create: failed to insert person")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	log.Infof("PersonHandler.Create: created person ID=%d", p.ID)
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(p)
+	if err := json.NewEncoder(w).Encode(p); err != nil {
+		log.WithError(err).Warn("PersonHandler.Create: failed to write response")
+	}
 }
 
-// вспомогалка для форматирования
 func ptrToString[T any](p *T, def string) string {
 	if p == nil {
 		return def
@@ -70,9 +77,8 @@ func ptrToString[T any](p *T, def string) string {
 }
 
 func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
+	log.Debug("PersonHandler.GetAll: parsing query params")
 	q := r.URL.Query()
-
-	// собираем фильтры
 	var (
 		where []string
 		args  []interface{}
@@ -89,15 +95,12 @@ func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		idx++
 	}
 
-	// базовый SELECT
 	base := `
         SELECT id, name, surname, patronymic, age, gender, nationality, created_at
         FROM persons`
 	if len(where) > 0 {
 		base += " WHERE " + strings.Join(where, " AND ")
 	}
-
-	// пагинация
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 {
 		limit = 20
@@ -105,8 +108,10 @@ func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	base += fmt.Sprintf(" ORDER BY id LIMIT %d OFFSET %d", limit, offset)
 
+	log.Debugf("PersonHandler.GetAll: executing query: %s args=%v", base, args)
 	rows, err := h.DB.Query(base, args...)
 	if err != nil {
+		log.WithError(err).Error("PersonHandler.GetAll: query failed")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -119,11 +124,10 @@ func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			&p.ID, &p.Name, &p.Surname, &p.Patronymic,
 			&p.Age, &p.Gender, &p.Nationality, &p.CreatedAt,
 		); err != nil {
+			log.WithError(err).Error("PersonHandler.GetAll: failed scanning row")
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		// формируем обогащённое сообщение
 		fullName := p.Name + " " + p.Surname
 		if p.Patronymic != nil {
 			fullName += " " + *p.Patronymic
@@ -135,33 +139,38 @@ func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			ptrToString(p.Gender, "unknown"),
 			ptrToString(p.Nationality, "unknown"),
 		)
-
 		result = append(result, p)
 	}
 
+	log.Infof("PersonHandler.GetAll: returning %d persons", len(result))
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.WithError(err).Warn("PersonHandler.GetAll: failed to write response")
+	}
 }
 
 func (h *PersonHandler) Update(w http.ResponseWriter, r *http.Request) {
 	idStr := strings.TrimPrefix(r.URL.Path, "/persons/")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
+		log.WithError(err).Warnf("PersonHandler.Update: invalid id %s", idStr)
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	log.Infof("PersonHandler.Update: updating person id=%d", id)
 	var p model.Person
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		log.WithError(err).Warn("PersonHandler.Update: invalid request payload")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	query := `
-      UPDATE persons SET name=$1,surname=$2,patronymic=$3
-      WHERE id=$4`
+	query := `UPDATE persons SET name=$1,surname=$2,patronymic=$3 WHERE id=$4`
 	if _, err := h.DB.Exec(query, p.Name, p.Surname, p.Patronymic, id); err != nil {
+		log.WithError(err).Error("PersonHandler.Update: exec failed")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	log.Infof("PersonHandler.Update: updated person id=%d", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -169,12 +178,16 @@ func (h *PersonHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	idStr := strings.TrimPrefix(r.URL.Path, "/persons/")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
+		log.WithError(err).Warnf("PersonHandler.Delete: invalid id %s", idStr)
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	log.Infof("PersonHandler.Delete: deleting person id=%d", id)
 	if _, err := h.DB.Exec("DELETE FROM persons WHERE id=$1", id); err != nil {
+		log.WithError(err).Error("PersonHandler.Delete: delete failed")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	log.Infof("PersonHandler.Delete: deleted person id=%d", id)
 	w.WriteHeader(http.StatusNoContent)
 }
