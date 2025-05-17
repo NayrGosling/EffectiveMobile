@@ -20,6 +20,7 @@ func (f *fakeDB) Exec(query string, args ...interface{}) (sql.Result, error) {
 	return nil, errors.New("exec error")
 }
 
+// TestGetByID_NotFound проверяет, что обработчик GetByID возвращает статус 404, когда запись не найдена.
 func TestGetByID_NotFound(t *testing.T) {
 	h := &PersonHandler{DB: (*sql.DB)(nil)}
 	req := httptest.NewRequest(http.MethodGet, "/persons/123", nil)
@@ -30,6 +31,7 @@ func TestGetByID_NotFound(t *testing.T) {
 	}
 }
 
+// TestCreate_BadPayload проверяет, что обработчик Create возвращает статус 400, когда получает некорректный JSON.
 func TestCreate_BadPayload(t *testing.T) {
 	h := &PersonHandler{DB: (*sql.DB)(nil)}
 	req := httptest.NewRequest(http.MethodPost, "/persons", bytes.NewBufferString(`{invalid json}`))

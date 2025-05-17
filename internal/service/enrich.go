@@ -9,12 +9,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// EnrichResult представляет результат обогащения данных.
 type EnrichResult struct {
-	Age         *int
-	Gender      *string
-	Nationality *string
+	Age         *int    `json:"age"`
+	Gender      *string `json:"gender"`
+	Nationality *string `json:"nationality"`
 }
 
+// Enrich обогащает данные о человеке, используя API Agify, Genderize и Nationalize.
+// Возвращает результат обогащения и ошибку, если таковая возникла.
 func Enrich(name string) (*EnrichResult, error) {
 	log.Debugf("service.Enrich: starting enrichment for name=%s", name)
 	var (
@@ -100,12 +103,16 @@ func Enrich(name string) (*EnrichResult, error) {
 	return &res, nil
 }
 
+// callAPI отправляет GET запрос на указанный URL и декодирует ответ в указанный интерфейс.
+// Если возникает ошибка при отправке запроса или декодировании ответа, возвращает ошибку.
 func callAPI(url string, out interface{}) error {
 	log.Debugf("service.callAPI: GET %s", url)
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+
 	return json.NewDecoder(resp.Body).Decode(out)
 }

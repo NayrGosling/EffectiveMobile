@@ -27,8 +27,9 @@ func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return t.base.RoundTrip(req)
 }
 
+// TestCallAPI_Success тестирует функцию callAPI с корректным JSON ответом.
+// Ожидается, что функция успешно декодирует JSON и вернет ожидаемый результат.
 func TestCallAPI_Success(t *testing.T) {
-	// Мокаем простой JSON-ответ
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(struct {
 			Foo string `json:"foo"`
@@ -40,13 +41,15 @@ func TestCallAPI_Success(t *testing.T) {
 	if err := callAPI(srv.URL, &out); err != nil {
 		t.Fatalf("callAPI returned error: %v", err)
 	}
+
 	if out.Foo != "bar" {
 		t.Errorf("expected Foo=bar, got %q", out.Foo)
 	}
 }
 
+// TestCallAPI_NonJSON тестирует функцию callAPI с некорректным JSON ответом.
+// Ожидается, что функция вернет ошибку при попытке декодирования некорректного JSON.
 func TestCallAPI_NonJSON(t *testing.T) {
-	// Сервер возвращает не-JSON
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("not json"))
 	}))
@@ -54,13 +57,17 @@ func TestCallAPI_NonJSON(t *testing.T) {
 
 	var out struct{ Foo string }
 	err := callAPI(srv.URL, &out)
+
 	if err == nil {
 		t.Fatal("expected error decoding non-JSON, got nil")
 	}
 }
 
+// TestEnrich_Success тестирует функцию Enrich в случае успешного выполнения.
+// Он создает тестовые серверы для agify, genderize и nationalize, которые имитируют ответы API.
+// Затем он настраивает http.DefaultClient для использования этих тестовых серверов.
+// Наконец, он вызывает функцию Enrich и проверяет, что она возвращает ожидаемые результаты.
 func TestEnrich_Success(t *testing.T) {
-	// Тестовые серверы для трёх API
 	agify := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"age":30}`)
 	}))
@@ -76,7 +83,6 @@ func TestEnrich_Success(t *testing.T) {
 	}))
 	defer nationalize.Close()
 
-	// Настраиваем перенаправление запросов
 	origClient := http.DefaultClient
 	http.DefaultClient = &http.Client{
 		Transport: &rewriteTransport{
@@ -106,14 +112,16 @@ func TestEnrich_Success(t *testing.T) {
 	}
 }
 
+// TestEnrich_PartialFailure тестирует функцию Enrich в случае частичного сбоя.
+// Он создает тестовые серверы для agify, genderize и nationalize, которые имитируют ответы API.
+// Затем он настраивает http.DefaultClient для использования этих тестовых серверов.
+// Наконец, он вызывает функцию Enrich и проверяет, что она возвращает ошибку, когда один из API возвращает 500.
 func TestEnrich_PartialFailure(t *testing.T) {
-	// Один из API умирает
 	agify := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "fail", http.StatusInternalServerError)
 	}))
 	defer agify.Close()
 
-	// Остальные возвращают корректно
 	genderize := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"gender":"female"}`)
 	}))
@@ -142,15 +150,18 @@ func TestEnrich_PartialFailure(t *testing.T) {
 	}
 }
 
-// mustHostPort выцепляет host:port из URL вроде http://127.0.0.1:12345
+// mustHostPort возвращает хост и порт из URL в виде строки.
+// Если URL некорректен или не содержит порт, функция вызывает панику.
 func mustHostPort(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		panic(err)
 	}
+
 	host, port, err := net.SplitHostPort(u.Host)
 	if err != nil {
 		panic(err)
 	}
+
 	return net.JoinHostPort(host, port)
 }

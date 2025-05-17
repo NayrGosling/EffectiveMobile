@@ -240,6 +240,9 @@ func (h *PersonHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ptrToString преобразует указатель на значение типа T в строку.
+// Если указатель равен nil, возвращает значение по умолчанию.
+// Использует функцию fmt.Sprint для преобразования значения в строку.
 func ptrToString[T any](p *T, def string) string {
 	if p == nil {
 		return def
