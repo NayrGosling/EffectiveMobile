@@ -1,0 +1,156 @@
+package service
+
+import (
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+	"time"
+)
+
+// rewriteTransport перенаправляет запросы к разным хостам на соответствующие тестовые серверы.
+type rewriteTransport struct {
+	base    http.RoundTripper
+	mapping map[string]string
+}
+
+func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Оригинальный хост, по которому строился URL
+	origHost := req.URL.Host
+	if newHost, ok := t.mapping[origHost]; ok {
+		req.URL.Scheme = "http"
+		req.URL.Host = newHost
+	}
+	return t.base.RoundTrip(req)
+}
+
+func TestCallAPI_Success(t *testing.T) {
+	// Мокаем простой JSON-ответ
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(struct {
+			Foo string `json:"foo"`
+		}{Foo: "bar"})
+	}))
+	defer srv.Close()
+
+	var out struct{ Foo string }
+	if err := callAPI(srv.URL, &out); err != nil {
+		t.Fatalf("callAPI returned error: %v", err)
+	}
+	if out.Foo != "bar" {
+		t.Errorf("expected Foo=bar, got %q", out.Foo)
+	}
+}
+
+func TestCallAPI_NonJSON(t *testing.T) {
+	// Сервер возвращает не-JSON
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	var out struct{ Foo string }
+	err := callAPI(srv.URL, &out)
+	if err == nil {
+		t.Fatal("expected error decoding non-JSON, got nil")
+	}
+}
+
+func TestEnrich_Success(t *testing.T) {
+	// Тестовые серверы для трёх API
+	agify := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"age":30}`)
+	}))
+	defer agify.Close()
+
+	genderize := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"gender":"male"}`)
+	}))
+	defer genderize.Close()
+
+	nationalize := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"country":[{"country_id":"US","probability":0.9}]}`)
+	}))
+	defer nationalize.Close()
+
+	// Настраиваем перенаправление запросов
+	origClient := http.DefaultClient
+	http.DefaultClient = &http.Client{
+		Transport: &rewriteTransport{
+			base: http.DefaultTransport,
+			mapping: map[string]string{
+				"api.agify.io":       mustHostPort(agify.URL),
+				"api.genderize.io":   mustHostPort(genderize.URL),
+				"api.nationalize.io": mustHostPort(nationalize.URL),
+			},
+		},
+		Timeout: 2 * time.Second,
+	}
+	defer func() { http.DefaultClient = origClient }()
+
+	res, err := Enrich("john")
+	if err != nil {
+		t.Fatalf("Enrich returned error: %v", err)
+	}
+	if res.Age == nil || *res.Age != 30 {
+		t.Errorf("expected Age=30, got %v", res.Age)
+	}
+	if res.Gender == nil || *res.Gender != "male" {
+		t.Errorf("expected Gender=male, got %v", res.Gender)
+	}
+	if res.Nationality == nil || *res.Nationality != "US" {
+		t.Errorf("expected Nationality=US, got %v", res.Nationality)
+	}
+}
+
+func TestEnrich_PartialFailure(t *testing.T) {
+	// Один из API умирает
+	agify := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "fail", http.StatusInternalServerError)
+	}))
+	defer agify.Close()
+
+	// Остальные возвращают корректно
+	genderize := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"gender":"female"}`)
+	}))
+	defer genderize.Close()
+
+	nationalize := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"country":[{"country_id":"CA","probability":0.5}]}`)
+	}))
+	defer nationalize.Close()
+
+	http.DefaultClient = &http.Client{
+		Transport: &rewriteTransport{
+			base: http.DefaultTransport,
+			mapping: map[string]string{
+				"api.agify.io":       mustHostPort(agify.URL),
+				"api.genderize.io":   mustHostPort(genderize.URL),
+				"api.nationalize.io": mustHostPort(nationalize.URL),
+			},
+		},
+		Timeout: 2 * time.Second,
+	}
+
+	_, err := Enrich("alice")
+	if err == nil {
+		t.Fatal("expected error when one of APIs вернул 500, got nil")
+	}
+}
+
+// mustHostPort выцепляет host:port из URL вроде http://127.0.0.1:12345
+func mustHostPort(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		panic(err)
+	}
+	host, port, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		panic(err)
+	}
+	return net.JoinHostPort(host, port)
+}

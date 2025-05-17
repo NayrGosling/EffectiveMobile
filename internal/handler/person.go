@@ -90,10 +90,12 @@ func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	if len(where) > 0 {
 		base += " WHERE " + strings.Join(where, " AND ")
 	}
+
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 {
 		limit = 20
 	}
+
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	base += fmt.Sprintf(" ORDER BY id LIMIT %d OFFSET %d", limit, offset)
 
@@ -111,10 +113,12 @@ func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		var p model.Person
 		rows.Scan(&p.ID, &p.Name, &p.Surname, &p.Patronymic,
 			&p.Age, &p.Gender, &p.Nationality, &p.CreatedAt)
+
 		fullName := p.Name + " " + p.Surname
 		if p.Patronymic != nil {
 			fullName += " " + *p.Patronymic
 		}
+
 		p.Message = fmt.Sprintf(
 			"%s: age %s, gender %s, nationality %s",
 			fullName,
@@ -122,6 +126,7 @@ func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 			ptrToString(p.Gender, "unknown"),
 			ptrToString(p.Nationality, "unknown"),
 		)
+
 		result = append(result, p)
 	}
 
@@ -139,6 +144,12 @@ func (h *PersonHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Infof("PersonHandler.GetByID: fetching person id=%d", id)
+
+	if h.DB == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
 	var p model.Person
 	err = h.DB.QueryRow(
 		`SELECT id, name, surname, patronymic, age, gender, nationality, created_at FROM persons WHERE id=$1`,
@@ -153,10 +164,12 @@ func (h *PersonHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	fullName := p.Name + " " + p.Surname
 	if p.Patronymic != nil {
 		fullName += " " + *p.Patronymic
 	}
+
 	p.Message = fmt.Sprintf(
 		"%s: age %s, gender %s, nationality %s",
 		fullName,
@@ -164,6 +177,7 @@ func (h *PersonHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		ptrToString(p.Gender, "unknown"),
 		ptrToString(p.Nationality, "unknown"),
 	)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(p)
 }
@@ -177,12 +191,14 @@ func (h *PersonHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Infof("PersonHandler.Update: updating person id=%d", id)
+
 	var p model.Person
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		log.WithError(err).Warn("PersonHandler.Update: invalid request payload")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	res, err := h.DB.Exec(
 		`UPDATE persons SET name=$1, surname=$2, patronymic=$3 WHERE id=$4`,
 		p.Name, p.Surname, p.Patronymic, id,
@@ -196,6 +212,7 @@ func (h *PersonHandler) Update(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -208,6 +225,7 @@ func (h *PersonHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Infof("PersonHandler.Delete: deleting person id=%d", id)
+
 	res, err := h.DB.Exec("DELETE FROM persons WHERE id=$1", id)
 	if err != nil {
 		log.WithError(err).Error("PersonHandler.Delete: exec failed")
@@ -218,6 +236,7 @@ func (h *PersonHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
