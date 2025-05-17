@@ -11,4 +11,5 @@ type Person struct {
 	Gender      *string   `json:"gender,omitempty"`
 	Nationality *string   `json:"nationality,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
+	Message     string    `json:"message"`
 }

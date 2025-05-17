@@ -22,49 +22,81 @@ func (h *PersonHandler) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	age, gender, nat, err := service.Enrich(p.Name)
+
+	// обогащаем
+	info, err := service.Enrich(p.Name)
 	if err != nil {
 		http.Error(w, "enrich error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	p.Age, p.Gender, p.Nationality = age, gender, nat
+	p.Age, p.Gender, p.Nationality = info.Age, info.Gender, info.Nationality
 
+	// формируем сообщение
+	p.Message = fmt.Sprintf(
+		"%s %s%s: age %v, gender %v, nationality %v",
+		p.Name, p.Surname,
+		func() string {
+			if p.Patronymic != nil {
+				return " " + *p.Patronymic
+			}
+			return ""
+		}(),
+		ptrToString(p.Age, "unknown"),
+		ptrToString(p.Gender, "unknown"),
+		ptrToString(p.Nationality, "unknown"),
+	)
+
+	// сохраняем в БД
 	query := `
       INSERT INTO persons (name, surname, patronymic, age, gender, nationality)
       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at`
-	err = h.DB.QueryRow(query,
+	if err := h.DB.QueryRow(query,
 		p.Name, p.Surname, p.Patronymic, p.Age, p.Gender, p.Nationality,
-	).Scan(&p.ID, &p.CreatedAt)
-	if err != nil {
+	).Scan(&p.ID, &p.CreatedAt); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(p)
 }
 
+// вспомогалка для форматирования
+func ptrToString[T any](p *T, def string) string {
+	if p == nil {
+		return def
+	}
+	return fmt.Sprint(*p)
+}
+
 func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
-	// фильтры: ?name=..&surname=..; пагинация: ?limit=10&offset=20
 	q := r.URL.Query()
+
+	// собираем фильтры
 	var (
 		where []string
 		args  []interface{}
+		idx   = 1
 	)
-	i := 1
 	if v := q.Get("name"); v != "" {
-		where = append(where, fmt.Sprintf("name ILIKE $%d", i))
+		where = append(where, fmt.Sprintf("name ILIKE $%d", idx))
 		args = append(args, "%"+v+"%")
-		i++
+		idx++
 	}
 	if v := q.Get("surname"); v != "" {
-		where = append(where, fmt.Sprintf("surname ILIKE $%d", i))
+		where = append(where, fmt.Sprintf("surname ILIKE $%d", idx))
 		args = append(args, "%"+v+"%")
-		i++
+		idx++
 	}
-	base := "SELECT id,name,surname,patronymic,age,gender,nationality,created_at FROM persons"
+
+	// базовый SELECT
+	base := `
+        SELECT id, name, surname, patronymic, age, gender, nationality, created_at
+        FROM persons`
 	if len(where) > 0 {
 		base += " WHERE " + strings.Join(where, " AND ")
 	}
+
 	// пагинация
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 {
@@ -79,17 +111,36 @@ func (h *PersonHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	var list []model.Person
+
+	var result []model.Person
 	for rows.Next() {
 		var p model.Person
-		if err := rows.Scan(&p.ID, &p.Name, &p.Surname, &p.Patronymic,
-			&p.Age, &p.Gender, &p.Nationality, &p.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&p.ID, &p.Name, &p.Surname, &p.Patronymic,
+			&p.Age, &p.Gender, &p.Nationality, &p.CreatedAt,
+		); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		list = append(list, p)
+
+		// формируем обогащённое сообщение
+		fullName := p.Name + " " + p.Surname
+		if p.Patronymic != nil {
+			fullName += " " + *p.Patronymic
+		}
+		p.Message = fmt.Sprintf(
+			"%s: age %s, gender %s, nationality %s",
+			fullName,
+			ptrToString(p.Age, "unknown"),
+			ptrToString(p.Gender, "unknown"),
+			ptrToString(p.Nationality, "unknown"),
+		)
+
+		result = append(result, p)
 	}
-	json.NewEncoder(w).Encode(list)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 func (h *PersonHandler) Update(w http.ResponseWriter, r *http.Request) {
